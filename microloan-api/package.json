@@ -1,0 +1,19 @@
+{
+  "name": "microloan-api",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@mysten/sui": "^1.32.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0"
+  }
+}
