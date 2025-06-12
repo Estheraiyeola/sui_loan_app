@@ -4,9 +4,13 @@ dotenv.config();
 import express from 'express';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
+import cors from 'cors';
 
 const app = express();
 const port = process.env.PORT || 3000;
+app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(express.json());
+
 
 app.get('/', (req, res) => {
   res.send('Microloan API is running!');
@@ -18,7 +22,9 @@ app.listen(port, () => {
 
 
 const PORT = process.env.PORT || '3001';
-const { SUI_URL, PACKAGE_ID, MODULE_NAME } = process.env;
+// const { SUI_URL, PACKAGE_ID, MODULE_NAME } = process.env;
+const PACKAGE_ID = '0x84b10f347185089b21b5c1c9443baede698fe0d93fc0f82e0adb651a35aab673';
+const MODULE_NAME ='microloan';
 
 // Initialize Sui provider
 const provider = new SuiClient({ url: getFullnodeUrl('testnet') });
@@ -35,6 +41,9 @@ async function getCoinForAmount(address, amount) {
 app.post('/init-reputation', async (req, res) => {
   try {
     const { userAddress } = req.body;
+    console.log('Initializing reputation for:', userAddress);
+    console.log('Package ID:', PACKAGE_ID);
+    console.log('Module Name:', MODULE_NAME);
     if (!userAddress) return res.status(400).json({ error: 'userAddress required' });
     const tx = new Transaction();
     tx.moveCall({ target: `${PACKAGE_ID}::${MODULE_NAME}::init_reputation`, arguments: [] });

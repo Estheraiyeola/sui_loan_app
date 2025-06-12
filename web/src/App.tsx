@@ -1,5 +1,4 @@
-// === File: src/App.tsx ===
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { Transaction } from '@mysten/sui/transactions';
@@ -12,10 +11,14 @@ import {
   jwtToAddress,
 } from '@mysten/sui/zklogin';
 import { jwtDecode } from 'jwt-decode';
-import { makePolymediaUrl, requestSuiFromFaucet } from '@polymedia/suitcase-core';
-import { LinkExternal, Modal, isLocalhost } from '@polymedia/suitcase-react';
+// import { makePolymediaUrl, requestSuiFromFaucet } from '@polymedia/suitcase-core';
+import { Modal, isLocalhost } from '@polymedia/suitcase-react';
 import config from './config.example.json';
+import { AccountPanel } from './components/AccountPanel';
+import { CreateLoanForm } from './components/CreateLoanForms';
+import { LoanList } from './components/LoanList';
 import './App.less';
+
 
 // Helper to decode base64 to Uint8Array
 function decodeBase64(base64: string): Uint8Array {
@@ -30,10 +33,7 @@ function decodeBase64(base64: string): Uint8Array {
   return Uint8Array.from(Buffer.from(base64, 'base64'));
 }
 
-
-  
-
-const NETWORK = 'devnet';
+export const NETWORK = 'testnet';
 const MAX_EPOCH = 2;
 const SUI_CLIENT = new SuiClient({ url: getFullnodeUrl(NETWORK) });
 const SETUP_KEY = 'zklogin-demo.setup';
@@ -60,7 +60,6 @@ export const App: React.FC = () => {
   const clearSetup = () => sessionStorage.removeItem(SETUP_KEY);
 
   const saveAccount = (acct: AccountData) => {
-    // Only save valid addresses
     if (!acct.address.startsWith('0x')) return;
     accountsRef.current = [acct, ...accountsRef.current];
     sessionStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accountsRef.current));
@@ -82,7 +81,7 @@ export const App: React.FC = () => {
     setBalances(new Map());
   };
 
-  const refreshBalances = useCallback(async () => {
+  const refreshBalances = async () => {
     const map = new Map<string, number>();
     await Promise.all(
       accountsRef.current.map(async (acct) => {
@@ -95,7 +94,7 @@ export const App: React.FC = () => {
       })
     );
     setBalances(map);
-  }, []);
+  };
 
   const startLogin = async (provider: OpenIdProvider) => {
     setModal(`Logging in with ${provider}…`);
@@ -130,7 +129,7 @@ export const App: React.FC = () => {
     const hash = window.location.hash.slice(1);
     if (!hash) return;
     const jwt = new URLSearchParams(hash).get('id_token');
-    window.history.replaceState(null, '', window.location.pathname);
+    window.history.replaceState(null, '', window.location.pathname + '/callback');
     if (!jwt) return;
 
     const { sub, aud } = jwtDecode<{ sub: string; aud: string }>(jwt);
@@ -154,6 +153,7 @@ export const App: React.FC = () => {
       salt,
       keyClaimName: 'sub',
     };
+    
     const zkRes = await fetch(config.URL_ZK_PROVER, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -165,73 +165,35 @@ export const App: React.FC = () => {
     setModal('');
   };
 
-const BACKEND_URL = 'http://localhost:3001';
-
-const sendTx = async (acct: AccountData, txType: string, params: any = {}) => {
-  setModal(`Sending ${txType} transaction…`);
-  try {
-    let response;
-    if (txType === 'init_reputation') {
-      response = await fetch(`${BACKEND_URL}/init-reputation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userAddress: acct.address }),
+  const signTx = async (acct: AccountData, txBytes: string) => {
+    setModal('Signing transaction…');
+    try {
+      const keypair = Ed25519Keypair.fromSecretKey(acct.privateKey);
+      const tx = Transaction.from(Buffer.from(txBytes, 'base64'));
+      tx.setSender(acct.address);
+      const { bytes, signature } = await tx.sign({ client: SUI_CLIENT, signer: keypair });
+      const seed = genAddressSeed(BigInt(acct.salt), 'sub', acct.sub, acct.aud).toString();
+      const zkSig = getZkLoginSignature({ inputs: { ...acct.zkProofs, addressSeed: seed }, maxEpoch: acct.maxEpoch, userSignature: signature });
+      const result = await SUI_CLIENT.executeTransactionBlock({
+        transactionBlock: bytes,
+        signature: zkSig,
+        options: { showEffects: true, showObjectChanges: true },
       });
-    } else if (txType === 'create_loan') {
-      response = await fetch(`${BACKEND_URL}/create-loan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, userAddress: acct.address, amount: Number(params.amount) * 1e9 }),
-      });
-    } else if (txType === 'back_loan') {
-      response = await fetch(`${BACKEND_URL}/back-loan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, userAddress: acct.address, amount: Number(params.amount) * 1e9 }),
-      });
-    } else if (txType === 'repay') {
-      response = await fetch(`${BACKEND_URL}/repay`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, userAddress: acct.address, repaymentAmount: Number(params.repaymentAmount) * 1e9 }),
-      });
-    } else {
-      throw new Error('Unknown transaction type');
+      setModal(`Transaction succeeded: ${result.digest}`);
+      refreshBalances();
+    } catch (err) {
+      console.error('Transaction failed', err);
+      setModal(`Transaction failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    const { success, transactionBytes, error } = await response.json();
-    if (!success) throw new Error(error);
-
-    const secretKey = decodeBase64(acct.privateKey);
-    // Derive the public key from the secret key
-    const keypair = Ed25519Keypair.fromSecretKey(secretKey);
-    const tx = Transaction.from(Buffer.from(transactionBytes, 'base64'));
-    tx.setSender(acct.address);
-    const { bytes, signature } = await tx.sign({ client: SUI_CLIENT, signer: keypair });
-    const seed = genAddressSeed(BigInt(acct.salt), 'sub', acct.sub, acct.aud).toString();
-    const zkSig = getZkLoginSignature({ inputs: { ...acct.zkProofs, addressSeed: seed }, maxEpoch: acct.maxEpoch, userSignature: signature });
-    const result = await SUI_CLIENT.executeTransactionBlock({
-      transactionBlock: bytes,
-      signature: zkSig,
-      options: { showEffects: true, showObjectChanges: true },
-    });
-    refreshBalances();
-    refreshReputations();
-    refreshLoans();
-    setModal(`Transaction succeeded: ${result.digest}`);
-  } catch (err: any) {
-    console.error('Transaction failed', err);
-    setModal(`Transaction failed: ${err.message}`);
-  }
-};
+  };
 
   const providers: OpenIdProvider[] = isLocalhost() ? ['Google', 'Twitch', 'Facebook'] : ['Google', 'Twitch'];
 
   return (
     <div id="page">
-      <Modal onClose={() => setModal('')}>{modal}</Modal> 
+      <Modal onClose={() => setModal('')}>{modal}</Modal>
       <div id="network-indicator">{NETWORK}</div>
-      <h1>Sui zkLogin Demo</h1>
+      <h1>Microloan DApp</h1>
       <section id="login-buttons" className="section">
         <h2>Log in:</h2>
         {providers.map(p => (
@@ -244,14 +206,14 @@ const sendTx = async (acct: AccountData, txType: string, params: any = {}) => {
         {accountsRef.current
           .filter(acct => acct.address)
           .map((acct, idx) => (
-            <div key={`${acct.address}-${idx}`} className="account">
-              <label className={`provider ${acct.provider}`}>{acct.provider}</label>
-              <div>Address: <a href={makePolymediaUrl(NETWORK, 'address', acct.address)} target="_blank" rel="noopener noreferrer">{acct.address}</a></div>
-              <div>User ID: {acct.sub}</div>
-              <div>Balance: {balances.get(acct.address) ?? '(loading)'} SUI</div>
-              <button className={`btn-send${!balances.get(acct.address) ? ' disabled' : ''}`} disabled={!balances.get(acct.address)} onClick={() => sendTx(acct, 'init_reputation')}>Send transaction</button>
-              {balances.get(acct.address) === 0 && <button className="btn-faucet" onClick={() => requestSuiFromFaucet(NETWORK, acct.address)}>Use faucet</button>}
-              <hr />
+            <div key={`${acct.address}-${idx}`}>
+              <AccountPanel
+                account={acct}
+                balance={balances.get(acct.address)}
+                signTx={txBytes => signTx(acct, txBytes)}
+              />
+              <CreateLoanForm address={acct.address} signTx={txBytes => signTx(acct, txBytes)} />
+              <LoanList address={acct.address} signTx={txBytes => signTx(acct, txBytes)} />
             </div>
           ))}
         <button className="btn-clear" onClick={clearState}>🧨 CLEAR STATE</button>
@@ -259,10 +221,3 @@ const sendTx = async (acct: AccountData, txType: string, params: any = {}) => {
     </div>
   );
 };
-
-function refreshReputations() {
-  throw new Error('Function not implemented.');
-}
-function refreshLoans() {
-  throw new Error('Function not implemented.');
-}
