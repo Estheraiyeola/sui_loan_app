@@ -14,6 +14,7 @@ export const useReputation = (address: string | null) => {
     if (!address) return;
     setLoading(true);
     try {
+      console.log(`Fetching reputation for address: ${address}`);
       const response = await fetch(`${BACKEND_URL}/get-reputation?userAddress=${address}`);
       const data = await response.json();
       if (data.success) {

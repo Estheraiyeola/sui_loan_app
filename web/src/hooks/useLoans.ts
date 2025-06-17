@@ -11,7 +11,7 @@ export const useLoans = (address: string | null) => {
     if (!address) return;
     setLoading(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/get-loan-details?userAddress=${address}`);
+      const response = await fetch(`${BACKEND_URL}/list-loans`);
       const data = await response.json();
       if (data.success) {
         const loanMap = new Map();
