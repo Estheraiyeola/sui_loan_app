@@ -10,8 +10,8 @@
         "dev": "vite"
     },
     "dependencies": {
-        "@mysten/sui": "^1.0.3",
-        "@mysten/zklogin": "^0.7.3",
+        "@mysten/sui": "^1.33.0",
+        "@mysten/zklogin": "^0.7.30",
         "@polymedia/suitcase-core": "^0.0.6",
         "@polymedia/suitcase-react": "^0.0.6",
         "jwt-decode": "^4.0.0",
@@ -36,5 +36,4 @@
     },
     "type": "module",
     "proxy": "http://localhost:3001"
-
 }

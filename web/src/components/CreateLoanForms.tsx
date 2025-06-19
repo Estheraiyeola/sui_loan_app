@@ -1,47 +1,84 @@
 import React, { useState } from 'react';
-import { useLoans } from '../hooks/useLoans';
+import { useReputation } from '../hooks/useReputation';
 
-type CreateLoanFormProps = {
-  address: string | null;
+interface CreateLoanFormProps {
+  address: string;
   signTx: (txBytes: string) => Promise<void>;
-};
+  disabled: boolean;
+}
 
-export const CreateLoanForm: React.FC<CreateLoanFormProps> = ({ address, signTx }) => {
-  const { loading, error, createLoan } = useLoans(address);
-  const [formData, setFormData] = useState({ amount: '', interestBps: '', dueEpoch: '' });
+export const CreateLoanForm: React.FC<CreateLoanFormProps> = ({ address, signTx, disabled }) => {
+  const { reputationId, loading } = useReputation(address);
+  const [amount, setAmount] = useState('');
+  const [interestBps, setInterestBps] = useState('');
+  const [dueEpoch, setDueEpoch] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    createLoan(Number(formData.amount), Number(formData.interestBps), Number(formData.dueEpoch), signTx);
+    if (!reputationId) {
+      alert('Please initialize your reputation first.');
+      return;
+    }
+    try {
+      const response = await fetch('http://localhost:3001/create-loan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAddress: address,
+          amount: Number(amount) * 1e9, // Convert SUI to MIST
+          interestBps: Number(interestBps),
+          dueEpoch: Number(dueEpoch),
+        }),
+      });
+      const { success, transactionBytes, error } = await response.json();
+      if (!success) throw new Error(error || 'Failed to create loan');
+      await signTx(transactionBytes);
+      alert('Loan created successfully!');
+    } catch (err) {
+      console.error('Failed to create loan:', err);
+      alert(`Error: ${err.message}`);
+    }
   };
 
   return (
-    <div className="create-loan-form">
+    <div className="create-loan-form" style={{ padding: '10px', margin: '10px' }}>
       <h3>Create Loan</h3>
+      {!reputationId && !loading && <p style={{ color: 'red' }}>Initialize reputation before creating a loan.</p>}
       <form onSubmit={handleSubmit}>
-        <input
-          type="number"
-          placeholder="Amount (SUI)"
-          value={formData.amount}
-          onChange={e => setFormData({ ...formData, amount: e.target.value })}
-        />
-        <input
-          type="number"
-          placeholder="Interest (bps)"
-          value={formData.interestBps}
-          onChange={e => setFormData({ ...formData, interestBps: e.target.value })}
-        />
-        <input
-          type="number"
-          placeholder="Due Epoch"
-          value={formData.dueEpoch}
-          onChange={e => setFormData({ ...formData, dueEpoch: e.target.value })}
-        />
-        <button type="submit" className="btn-action" disabled={loading}>
-          {loading ? 'Creating...' : 'Create Loan'}
+        <div>
+          <label>Amount (SUI):</label>
+          <input
+            type="number"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            disabled={disabled || !reputationId || loading}
+            required
+          />
+        </div>
+        <div>
+          <label>Interest Rate (BPS, e.g., 100 = 1%):</label>
+          <input
+            type="number"
+            value={interestBps}
+            onChange={e => setInterestBps(e.target.value)}
+            disabled={disabled || !reputationId || loading}
+            required
+          />
+        </div>
+        <div>
+          <label>Due Epoch:</label>
+          <input
+            type="number"
+            value={dueEpoch}
+            onChange={e => setDueEpoch(e.target.value)}
+            disabled={disabled || !reputationId || loading}
+            required
+          />
+        </div>
+        <button type="submit" disabled={disabled || !reputationId || loading}>
+          Create Loan
         </button>
       </form>
-      {error && <div className="error">{error}</div>}
     </div>
   );
 };

@@ -1,80 +1,74 @@
-import React, { useState } from 'react';
-import { useLoans } from '../hooks/useLoans';
-import { useReputation } from '../hooks/useReputation';
+import { useEffect, useState } from 'react';
 
-type LoanListProps = {
-  address: string | null;
-  signTx: (txBytes: string) => Promise<void>;
+type Loan = {
+  id: string;
+  requester: string;
+  amount: number;
+  interest_bps: number;
+  due_epoch: number;
+  backed: boolean;
+  backer: string;
+  escrow_id: string;
 };
 
-export const LoanList: React.FC<LoanListProps> = ({ address, signTx }) => {
-  const { loans, loading, error, backLoan, repayLoan } = useLoans(address);
-  const { reputationId } = useReputation(address);
-  const [backForm, setBackForm] = useState({ loanRequestId: '', amount: '' });
-  const [repayForm, setRepayForm] = useState({ loanRequestId: '', repaymentAmount: '' });
+export const LoanList: React.FC<{
+  address: string;
+  signTx: (txBytes: string) => Promise<void>;
+}> = ({ address }) => {
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleBackSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    backLoan(backForm.loanRequestId, Number(backForm.amount), signTx);
+  const fetchLoans = async () => {
+    try {
+      console.log(`Fetching loans for owner: ${address}`);
+      const response = await fetch(`http://localhost:3001/list-loans?owner=${address}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          setLoans([]); // Handle 404 by setting empty loans
+          return;
+        }
+        const text = await response.text();
+        throw new Error(`HTTP error! Status: ${response.status}, Response: ${text}`);
+      }
+      const data = await response.json();
+      if (data.success) {
+        setLoans(data.loans || []);
+      } else {
+        throw new Error(data.error || 'Failed to fetch loans');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('Failed to fetch loans:', errorMessage);
+      setError(errorMessage);
+    }
   };
 
-  const handleRepaySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reputationId) return alert('Reputation not initialized');
-    repayLoan(repayForm.loanRequestId, Number(repayForm.repaymentAmount), reputationId, signTx);
-  };
+  useEffect(() => {
+    if (address) {
+      fetchLoans();
+    }
+  }, [address]);
 
   return (
     <div className="loan-list">
-      <h3>Loans</h3>
-      {Array.from(loans.entries()).map(([id, loan]) => (
-        <div key={id} className="loan">
-          <div>ID: {id}</div>
-          <div>Amount: {loan.amount} SUI</div>
-          <div>Interest: {loan.interestBps} bps</div>
-          <div>Due Epoch: {loan.dueEpoch}</div>
-          <div>Backed: {loan.backed ? 'Yes' : 'No'}</div>
-          <div>Backer: {loan.backer}</div>
-          <div>Escrow ID: {loan.escrowId}</div>
-        </div>
-      ))}
-      <h3>Back Loan</h3>
-      <form onSubmit={handleBackSubmit}>
-        <input
-          type="text"
-          placeholder="Loan Request ID"
-          value={backForm.loanRequestId}
-          onChange={e => setBackForm({ ...backForm, loanRequestId: e.target.value })}
-        />
-        <input
-          type="number"
-          placeholder="Amount (SUI)"
-          value={backForm.amount}
-          onChange={e => setBackForm({ ...backForm, amount: e.target.value })}
-        />
-        <button type="submit" className="btn-action" disabled={loading}>
-          {loading ? 'Backing...' : 'Back Loan'}
-        </button>
-      </form>
-      <h3>Repay Loan</h3>
-      <form onSubmit={handleRepaySubmit}>
-        <input
-          type="text"
-          placeholder="Loan Request ID"
-          value={repayForm.loanRequestId}
-          onChange={e => setRepayForm({ ...repayForm, loanRequestId: e.target.value })}
-        />
-        <input
-          type="number"
-          placeholder="Repayment Amount (SUI)"
-          value={repayForm.repaymentAmount}
-          onChange={e => setRepayForm({ ...repayForm, repaymentAmount: e.target.value })}
-        />
-        <button type="submit" className="btn-action" disabled={loading || !reputationId}>
-          {loading ? 'Repaying...' : 'Repay Loan'}
-        </button>
-      </form>
+      <h3>Your Loans</h3>
       {error && <div className="error">{error}</div>}
+      {loans.length === 0 ? (
+        <p>No loans found.</p>
+      ) : (
+        <ul>
+          {loans.map((loan) => (
+            <li key={loan.id}>
+              <div>Loan ID: {loan.id}</div>
+              <div>Amount: {loan.amount} SUI</div>
+              <div>Interest: {loan.interest_bps / 100}%</div>
+              <div>Due Epoch: {loan.due_epoch}</div>
+              <div>Backed: {loan.backed ? 'Yes' : 'No'}</div>
+              <div>Backer: {loan.backer}</div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 };

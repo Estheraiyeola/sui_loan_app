@@ -33,7 +33,7 @@ function decodeBase64(base64: string): Uint8Array {
   return Uint8Array.from(Buffer.from(base64, 'base64'));
 }
 
-export const NETWORK = 'testnet';
+export const NETWORK = 'devnet';
 const MAX_EPOCH = 2;
 const SUI_CLIENT = new SuiClient({ url: getFullnodeUrl(NETWORK) });
 const SETUP_KEY = 'zklogin-demo.setup';
@@ -166,27 +166,55 @@ export const App: React.FC = () => {
   };
 
   const signTx = async (acct: AccountData, txBytes: string) => {
-    setModal('Signing transaction…');
-    try {
-      const keypair = Ed25519Keypair.fromSecretKey(acct.privateKey);
-      const tx = Transaction.from(Buffer.from(txBytes, 'base64'));
-      tx.setSender(acct.address);
-      const { bytes, signature } = await tx.sign({ client: SUI_CLIENT, signer: keypair });
-      const seed = genAddressSeed(BigInt(acct.salt), 'sub', acct.sub, acct.aud).toString();
-      const zkSig = getZkLoginSignature({ inputs: { ...acct.zkProofs, addressSeed: seed }, maxEpoch: acct.maxEpoch, userSignature: signature });
-      const result = await SUI_CLIENT.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature: zkSig,
-        options: { showEffects: true, showObjectChanges: true },
-      });
-      setModal(`Transaction succeeded: ${result.digest}`);
-      refreshBalances();
-    } catch (err) {
-      console.error('Transaction failed', err);
-      setModal(`Transaction failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
+  setModal('Signing transaction…');
+  try {
+    // Log AccountData for debugging
+    console.log('AccountData:', {
+      address: acct.address,
+      salt: acct.salt,
+      sub: acct.sub,
+      aud: acct.aud,
+      maxEpoch: acct.maxEpoch,
+      zkProofs: acct.zkProofs,
+      privateKey: acct.privateKey ? '[REDACTED]' : undefined,
+    });
 
+    // Validate AccountData fields
+    if (!acct.sub || !acct.aud) {
+      throw new Error('Missing sub or aud in AccountData');
+    }
+    if (!acct.zkProofs || !acct.zkProofs.proofPoints || !acct.zkProofs.proofPoints.a) {
+      throw new Error('Invalid or missing zkProofs in AccountData');
+    }
+
+    const keypair = Ed25519Keypair.fromSecretKey(acct.privateKey);
+    const tx = Transaction.from(txBytes);
+    tx.setSender(acct.address);
+    const { bytes, signature } = await tx.sign({ client: SUI_CLIENT, signer: keypair });
+
+    const seed = genAddressSeed(BigInt(acct.salt), 'sub', acct.sub, acct.aud).toString();
+    const zkSig = getZkLoginSignature({
+      inputs: { ...acct.zkProofs, addressSeed: seed },
+      maxEpoch: acct.maxEpoch,
+      userSignature: signature,
+    });
+
+    const result = await SUI_CLIENT.executeTransactionBlock({
+      transactionBlock: bytes,
+      signature: zkSig,
+      options: { showEffects: true, showObjectChanges: true },
+    });
+
+    console.log('Transaction result:', result);
+    setModal(`Transaction succeeded: ${result.digest}`);
+    refreshBalances();
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error('Transaction failed:', errorMessage, err);
+    setModal(`Transaction failed: ${errorMessage}`);
+    throw err; // Re-throw for caller (e.g., initReputation) to handle
+  }
+};
   const providers: OpenIdProvider[] = isLocalhost() ? ['Google', 'Twitch', 'Facebook'] : ['Google', 'Twitch'];
 
   return (
@@ -211,8 +239,13 @@ export const App: React.FC = () => {
                 account={acct}
                 balance={balances.get(acct.address)}
                 signTx={txBytes => signTx(acct, txBytes)}
+                isCurrent={idx === 0}
               />
-              <CreateLoanForm address={acct.address} signTx={txBytes => signTx(acct, txBytes)} />
+              <CreateLoanForm
+                address={acct.address}
+                signTx={txBytes => signTx(acct, txBytes)}
+                disabled={idx !== 0}
+              />
               <LoanList address={acct.address} signTx={txBytes => signTx(acct, txBytes)} />
             </div>
           ))}
